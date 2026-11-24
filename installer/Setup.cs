@@ -12,16 +12,17 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("Русификатор PC Store Together")]
-[assembly: AssemblyDescription("Установщик русской локализации для Steam-сборки 26897952")]
 [assembly: AssemblyProduct("PC Store Together RUS")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
 
 namespace PcTogetherRus
 {
     internal static class Setup
     {
         internal const string Title = "Русификатор PC Store Together";
+        private static readonly Lazy<ReleaseManifest> manifest =
+            new Lazy<ReleaseManifest>(() => ReleaseManifest.Parse(ReadResource("release.json")));
+
+        internal static ReleaseManifest Release { get { return manifest.Value; } }
 
         [STAThread]
         private static int Main(string[] args)
@@ -44,7 +45,7 @@ namespace PcTogetherRus
             }
             try
             {
-                string message = InstallTransaction.Run(args[start + 1], args[start] == "--restore");
+                string message = Run(args[start + 1], args[start] == "--restore");
                 if (elevatedUi)
                 {
                     MessageBox.Show(message, Title, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -66,6 +67,20 @@ namespace PcTogetherRus
                     Console.Error.WriteLine(error.Message);
                 }
                 return 1;
+            }
+        }
+
+        internal static string Run(string path, bool restore)
+        {
+            return InstallTransaction.Run(path, restore, Release, restore ? null : ReadResource("ru.json"));
+        }
+
+        private static string ReadResource(string name)
+        {
+            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+            using (var reader = new StreamReader(stream))
+            {
+                return reader.ReadToEnd();
             }
         }
 
@@ -133,13 +148,13 @@ namespace PcTogetherRus
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             AddRow(layout, new Label
             {
-                Text = "Русификатор v1.0.0",
+                Text = "Русификатор v" + Setup.Release.version,
                 AutoSize = true,
                 Font = new Font(Font.FontFamily, 15, FontStyle.Bold)
             }, 0);
             AddRow(layout, new Label
             {
-                Text = "Steam-сборка 26897952",
+                Text = "Steam-сборка " + Setup.Release.steamBuildId,
                 AutoSize = true,
                 Margin = new Padding(3, 0, 3, 14)
             }, 1);
@@ -202,7 +217,7 @@ namespace PcTogetherRus
                 string fullPath = Path.GetFullPath(path);
                 try
                 {
-                    status.Text = await Task.Run(() => InstallTransaction.Run(fullPath, restoreOriginal));
+                    status.Text = await Task.Run(() => Setup.Run(fullPath, restoreOriginal));
                     return;
                 }
                 catch (UnauthorizedAccessException)
@@ -257,7 +272,7 @@ namespace PcTogetherRus
                     foreach (string library in Libraries(root))
                     {
                         string apps = Path.Combine(library, "steamapps");
-                        string manifest = Path.Combine(apps, "appmanifest_4990940.acf");
+                        string manifest = Path.Combine(apps, "appmanifest_" + Setup.Release.steamAppId + ".acf");
                         if (!File.Exists(manifest))
                         {
                             continue;

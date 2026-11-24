@@ -112,7 +112,7 @@ namespace PcTogetherRus
 
         public static string Build(string originalPath, string outputPath, Dictionary<string, string> russian)
         {
-            Require(FileHash(originalPath) == OriginalHash, "Ожидается исходный ресурс Steam-сборки 26897952.");
+            Require(FileHash(originalPath) == OriginalHash, "Не совпадает контрольная сумма исходного ресурса игры.");
             byte[] original = File.ReadAllBytes(originalPath);
             var asset = new Asset(original);
             Require(asset.Objects.Count == 8312 && asset.Objects[8312].Position + RowSize == asset.TableEnd &&
