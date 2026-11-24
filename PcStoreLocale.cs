@@ -11,9 +11,9 @@ namespace PcTogetherRus
     public static class LocalePatch
     {
         public const string AssetName = "sharedassets1.assets";
-        public const string OriginalHash = "A01012AB9A74082A224586393CCF3956D02F621C2E3D5ED69066F737B4EAA3BD";
-        public const string AssemblyHash = "3F59A45CF7508ADFAFBF03FBED9B2B7FF640E48963CE1093CE3EFED1F09C6E30";
-        public const int EntryCount = 4044;
+        public const string OriginalHash = "1933E381018CCD2C68D19315A8583A3212B473C0837DEC72AF460818DEAD9629";
+        public const string AssemblyHash = "D6FCCC38DC44A6EC90892714A1BF15217DA947F8818321EC135AE5414A159586";
+        public const int EntryCount = 4060;
 
         private const long EnglishId = 5886;
         private const long CatalogId = 5966;
