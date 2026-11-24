@@ -61,7 +61,6 @@ try {
         'Install-Russian.ps1',
         'PcStoreLocale.cs',
         'PcStoreLabels.cs',
-        'ru.json',
         'installer/InstallTransaction.cs',
         'ru.json',
         'lib/Mono.Cecil.dll',
@@ -87,8 +86,14 @@ try {
         [IO.File]::Replace($stagedManifest, $manifestPath, [NullString]::Value)
     }
     foreach ($artifact in @($exeFiles.FullName) + @($zipPath, "$zipPath.sha256")) {
-        Move-Item -LiteralPath $artifact -Destination (Join-Path $dist (Split-Path -Leaf $artifact)) -Force
-        Get-Item -LiteralPath (Join-Path $dist (Split-Path -Leaf $artifact))
+        $destination = Join-Path $dist (Split-Path -Leaf $artifact)
+        if ([IO.File]::Exists($destination)) {
+            [IO.File]::Replace($artifact, $destination, [NullString]::Value)
+        }
+        else {
+            [IO.File]::Move($artifact, $destination)
+        }
+        Get-Item -LiteralPath $destination
     }
 }
 finally {
