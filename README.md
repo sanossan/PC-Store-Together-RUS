@@ -42,6 +42,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\Install-Russian.ps1' 
 
 Установщик собирает патч из локальных файлов игры. В EXE и ZIP входит библиотека Mono.Cecil 0.11.6. [Mono.Cecil и лицензия MIT](https://github.com/jbevain/cecil/tree/0.11.6)
 
+## Сборка релиза
+
+Укажите версию и целевую Steam-сборку в `release.json`. При обновлении для той же сборки добавьте в `previousPatches` номер и обе контрольные суммы прошлого релиза, сохранив существующую историю. Для новой Steam-сборки адаптируйте код патча под её оригинальные файлы и начните историю со списка `[]`.
+
+Из корня репозитория запустите команду с путём к копии поддерживаемой сборки с оригинальными файлами.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Release.ps1 -GamePath 'D:\GameCopy'
+```
+
+Команда обновит хеши патча в манифесте и соберёт в `dist` установщик, ZIP и контрольные суммы. В описании выпуска на GitHub укажите Steam Build ID, изменения перевода и порядок обновления.
+
+## Обновления
 <details>
 <summary>История обновлений</summary>
 
@@ -56,15 +69,3 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\Install-Russian.ps1' 
 </p>
 
 </details>
-
-## Сборка релиза
-
-Укажите версию и целевую Steam-сборку в `release.json`. При обновлении для той же сборки добавьте в `previousPatches` номер и обе контрольные суммы прошлого релиза, сохранив существующую историю. Для новой Steam-сборки адаптируйте код патча под её оригинальные файлы и начните историю со списка `[]`.
-
-Из корня репозитория запустите команду с путём к копии поддерживаемой сборки с оригинальными файлами.
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\installer\Build-Release.ps1 -GamePath 'D:\GameCopy'
-```
-
-Команда обновит хеши патча в манифесте и соберёт в `dist` установщик, ZIP и контрольные суммы. В описании выпуска на GitHub укажите Steam Build ID, изменения перевода и порядок обновления.
