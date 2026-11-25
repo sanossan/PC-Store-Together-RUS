@@ -1,5 +1,5 @@
 {
-    "version":  "1.3.0",
+    "version":  "1.3.1",
     "gameVersion":  "0.1.6",
     "steamAppId":  4990940,
     "steamBuildId":  26927316,
@@ -7,6 +7,10 @@
     "patchedAssetSha256":  "550FB862B61A077226DD58FD8902CD66A6ADA7F5EE9C6A7A8448E1CEBA86453A",
     "patchedAssemblySha256":  "EE4AB71130991907082BC00752194284340656BCA888BDC2227C5D0184DFD6B1",
     "previousPatches":  [
-
+                            {
+                                "version":  "1.3.0",
+                                "patchedAssetSha256":  "550FB862B61A077226DD58FD8902CD66A6ADA7F5EE9C6A7A8448E1CEBA86453A",
+                                "patchedAssemblySha256":  "EE4AB71130991907082BC00752194284340656BCA888BDC2227C5D0184DFD6B1"
+                            }
                         ]
 }

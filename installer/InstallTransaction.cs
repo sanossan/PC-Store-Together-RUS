@@ -100,6 +100,7 @@ namespace PcTogetherRus
 
         private sealed class InstalledBuild
         {
+            public string Version { get; set; }
             public InstalledFile Asset { get; set; }
             public InstalledFile Assembly { get; set; }
 
@@ -120,6 +121,7 @@ namespace PcTogetherRus
         {
             public string Original { get; set; }
             public List<string> Patched { get; set; }
+            public string Target { get; set; }
 
             public void Validate()
             {
@@ -129,6 +131,10 @@ namespace PcTogetherRus
                     throw new InvalidDataException("Отсутствуют контрольные суммы установленного перевода.");
                 }
                 Patched = Patched.Select(ReleaseManifest.ParseHash).ToList();
+                if (Target != null && !Patched.Contains(Target = ReleaseManifest.ParseHash(Target)))
+                {
+                    throw new InvalidDataException("Неизвестная контрольная сумма установленного перевода.");
+                }
             }
         }
 
@@ -140,10 +146,16 @@ namespace PcTogetherRus
 
         public static string Run(string gameFolder, bool restore, string releaseJson, string russianJson)
         {
-            return Run(gameFolder, restore, ReleaseManifest.Parse(releaseJson), russianJson);
+            return Run(gameFolder, restore, releaseJson, russianJson, true);
         }
 
-        internal static string Run(string gameFolder, bool restore, ReleaseManifest release, string russianJson)
+        public static string Run(string gameFolder, bool restore, string releaseJson, string russianJson, bool keepBackup)
+        {
+            return Run(gameFolder, restore, ReleaseManifest.Parse(releaseJson), russianJson, keepBackup);
+        }
+
+        internal static string Run(string gameFolder, bool restore, ReleaseManifest release, string russianJson,
+            bool keepBackup)
         {
             string root = Path.GetFullPath(gameFolder);
             if (!IsGameFolder(root))
@@ -161,12 +173,12 @@ namespace PcTogetherRus
                     throw new InvalidDataException("Установлена Steam-сборка " + detectedBuild.Value +
                         ". Требуется сборка " + release.steamBuildId + " или новее. Обновите игру в Steam.");
                 }
-                return Apply(root, data, release, detectedBuild, russianJson, restore);
+                return Apply(root, data, release, detectedBuild, russianJson, restore, keepBackup && !restore);
             }
         }
 
         private static string Apply(string root, string data, ReleaseManifest release, long? detectedBuild,
-            string russianJson, bool restore)
+            string russianJson, bool restore, bool keepBackup)
         {
             string suffix = ".pc-together-rus-" + Guid.NewGuid().ToString("N");
             long buildId = detectedBuild ?? release.steamBuildId;
@@ -200,10 +212,11 @@ namespace PcTogetherRus
                     throw new InvalidDataException("Для Steam-сборки " + buildId +
                         " нет записи об установке русификатора. " + VerifySteam);
                 }
+                bool sameRelease = installed != null && installed.Version == release.version;
                 locale = DescribeCompatible(assetPath, installed == null ? null : installed.Asset,
-                    buildId, restore, suffix);
+                    buildId, restore, sameRelease, suffix);
                 labels = DescribeCompatible(assemblyPath, installed == null ? null : installed.Assembly,
-                    buildId, restore, suffix);
+                    buildId, restore, sameRelease, suffix);
             }
             else
             {
@@ -213,6 +226,10 @@ namespace PcTogetherRus
                     release.previousPatches.Select(patch => patch.patchedAssemblySha256), buildId, restore, suffix);
             }
             var files = new[] { locale, labels };
+            foreach (var file in files.Where(file => file.Current != file.Target))
+            {
+                CheckBackup(file, keepBackup, compatible);
+            }
             var replaced = new List<GameFile>();
             try
             {
@@ -250,19 +267,18 @@ namespace PcTogetherRus
                 {
                     return restore ? "Игра уже использует оригинальные файлы." : "Русификатор уже установлен.";
                 }
-                foreach (var file in compatible && !restore ? files : pending)
+                if (keepBackup)
                 {
-                    if (!File.Exists(file.Backup))
+                    foreach (var file in pending)
                     {
-                        File.Copy(file.Path, file.BackupStage);
-                        RequireHash(LocalePatch.FileHash(file.BackupStage), file.Original, file.BackupStage);
-                        File.Move(file.BackupStage, file.Backup);
+                        if (!File.Exists(file.Backup))
+                        {
+                            File.Copy(file.Path, file.BackupStage);
+                            RequireHash(LocalePatch.FileHash(file.BackupStage), file.Original, file.BackupStage);
+                            File.Move(file.BackupStage, file.Backup);
+                        }
+                        RequireHash(LocalePatch.FileHash(file.Backup), file.Original, file.Backup);
                     }
-                    RequireHash(LocalePatch.FileHash(file.Backup), file.Original, file.Backup);
-                }
-                if (compatible && !restore)
-                {
-                    SaveInstalledBuild(installed, document, documentStage, locale, labels);
                 }
 
                 EnsureGameClosed();
@@ -273,6 +289,10 @@ namespace PcTogetherRus
                 foreach (var file in files)
                 {
                     RequireHash(LocalePatch.FileHash(file.Path), file.Current, file.Path);
+                }
+                if (compatible && !restore)
+                {
+                    SaveInstalledBuild(installed, document, documentStage, locale, labels, release.version);
                 }
                 foreach (var file in pending)
                 {
@@ -300,8 +320,7 @@ namespace PcTogetherRus
                 if (failedRollbacks.Count != 0)
                 {
                     failedRollbacks.Insert(0, cause);
-                    throw new AggregateException("Откат прервался. Резервные копии сохранены. " +
-                        "Закройте игру и повторите восстановление.", failedRollbacks);
+                    throw new AggregateException("Откат прервался. Закройте игру. " + VerifySteam, failedRollbacks);
                 }
                 if (compatible && !restore && replaced.Count == 0 && IsCompatibilityError(cause))
                 {
@@ -337,33 +356,19 @@ namespace PcTogetherRus
         private static GameFile Describe(string path, string original, string patched, IEnumerable<string> previous,
             long steamBuildId, bool restore, string suffix)
         {
-            string legacyBackup = path + BackupSuffix;
-            string backup = legacyBackup + "." + steamBuildId;
+            string backup = path + BackupSuffix + "." + steamBuildId;
             string current = LocalePatch.FileHash(path);
-            bool hasBackup = File.Exists(backup);
             if (current != original && current != patched && !previous.Contains(current))
             {
                 throw new InvalidDataException("Неизвестная контрольная сумма игрового файла. " +
                     "Проверьте версию игры и целостность файлов в Steam. Требуется Steam-сборка " +
                     steamBuildId + "." + Environment.NewLine + path);
             }
-            bool validBackup = hasBackup && LocalePatch.FileHash(backup) == original;
-            if (!validBackup && File.Exists(legacyBackup) && LocalePatch.FileHash(legacyBackup) == original)
-            {
-                backup = legacyBackup;
-                validBackup = true;
-            }
-            if (!validBackup && (hasBackup || current != original))
-            {
-                throw new InvalidDataException("Резервная копия оригинала отсутствует или повреждена. " +
-                    "Проверьте целостность файлов в Steam и резервную копию для сборки " +
-                    steamBuildId + "." + Environment.NewLine + backup);
-            }
             return CreateGameFile(path, original, current, restore ? original : patched, backup, suffix);
         }
 
         private static GameFile DescribeCompatible(string path, InstalledFile installed, long buildId, bool restore,
-            string suffix)
+            bool sameRelease, string suffix)
         {
             string backup = path + BackupSuffix + "." + buildId;
             string current = LocalePatch.FileHash(path);
@@ -373,13 +378,33 @@ namespace PcTogetherRus
                 throw new InvalidDataException("Файл игры не совпадает с оригиналом или установленным переводом " +
                     "для сборки " + buildId + ". " + VerifySteam + Environment.NewLine + path);
             }
-            bool hasBackup = File.Exists(backup);
-            if ((hasBackup && LocalePatch.FileHash(backup) != original) || (installed != null && !hasBackup))
+            string target = restore ? original : sameRelease ? installed.Target : null;
+            return CreateGameFile(path, original, current, target, backup, suffix);
+        }
+
+        private static void CheckBackup(GameFile file, bool keepBackup, bool compatible)
+        {
+            bool needsOriginal = file.Current != file.Original;
+            if (!needsOriginal && !keepBackup)
+            {
+                return;
+            }
+            bool hasBackup = File.Exists(file.Backup);
+            if (hasBackup && LocalePatch.FileHash(file.Backup) == file.Original)
+            {
+                return;
+            }
+            string legacyBackup = file.Path + BackupSuffix;
+            if (!compatible && File.Exists(legacyBackup) && LocalePatch.FileHash(legacyBackup) == file.Original)
+            {
+                file.Backup = legacyBackup;
+                return;
+            }
+            if (needsOriginal || hasBackup)
             {
                 throw new InvalidDataException("Резервная копия оригинала отсутствует или повреждена. " +
-                    VerifySteam + Environment.NewLine + backup);
+                    VerifySteam + Environment.NewLine + file.Backup);
             }
-            return CreateGameFile(path, original, current, restore ? original : null, backup, suffix);
         }
 
         private static GameFile CreateGameFile(string path, string original, string current, string target, string backup,
@@ -399,7 +424,7 @@ namespace PcTogetherRus
         }
 
         private static void SaveInstalledBuild(InstalledBuild installed, string document, string stage, GameFile locale,
-            GameFile labels)
+            GameFile labels, string version)
         {
             if (installed == null)
             {
@@ -410,6 +435,9 @@ namespace PcTogetherRus
                 };
             }
             // Publish the hashes first so a retry recognizes either file if replacement is interrupted.
+            installed.Version = version;
+            installed.Asset.Target = locale.Target;
+            installed.Assembly.Target = labels.Target;
             if (!installed.Asset.Patched.Contains(locale.Target))
             {
                 installed.Asset.Patched.Add(locale.Target);

@@ -4,11 +4,17 @@ param(
     [string] $GamePath,
 
     [ValidateSet('Install', 'Restore')]
-    [string] $Action = 'Install'
+    [string] $Action = 'Install',
+
+    [switch] $NoBackup
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+if ($Action -eq 'Restore' -and $NoBackup) {
+    throw 'Параметр -NoBackup применяется только при установке.'
+}
 
 if ($PSVersionTable.PSEdition -ne 'Desktop') {
     throw 'Запустите скрипт в Windows PowerShell 5.1 (powershell.exe).'
@@ -36,7 +42,7 @@ $russian = if (-not $restore) {
     Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ru.json') -Raw -Encoding UTF8
 }
 try {
-    [PcTogetherRus.InstallTransaction]::Run($game, $restore, $release, $russian)
+    [PcTogetherRus.InstallTransaction]::Run($game, $restore, $release, $russian, (-not $NoBackup))
 }
 catch [Management.Automation.MethodInvocationException] {
     throw $_.Exception.InnerException

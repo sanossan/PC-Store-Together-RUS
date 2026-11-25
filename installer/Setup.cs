@@ -36,16 +36,18 @@ namespace PcTogetherRus
                 return 0;
             }
 
-            bool elevatedUi = args.Length == 3 && args[0] == "--show-result";
+            bool elevatedUi = args[0] == "--show-result";
             int start = elevatedUi ? 1 : 0;
-            if (args.Length != start + 2 || (args[start] != "--install" && args[start] != "--restore"))
+            bool noBackup = args.Length == start + 3 && args[start + 2] == "--no-backup";
+            if (args.Length != start + (noBackup ? 3 : 2) ||
+                (args[start] != "--install" && (args[start] != "--restore" || noBackup)))
             {
-                Console.Error.WriteLine("Использование: --install <папка игры> или --restore <папка игры>.");
+                Console.Error.WriteLine("Использование: --install <папка игры> [--no-backup] или --restore <папка игры>.");
                 return 2;
             }
             try
             {
-                string message = Run(args[start + 1], args[start] == "--restore");
+                string message = Run(args[start + 1], args[start] == "--restore", !noBackup);
                 if (elevatedUi)
                 {
                     MessageBox.Show(message, Title, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -70,9 +72,9 @@ namespace PcTogetherRus
             }
         }
 
-        internal static string Run(string path, bool restore)
+        internal static string Run(string path, bool restore, bool keepBackup)
         {
-            return InstallTransaction.Run(path, restore, Release, restore ? null : ReadResource("ru.json"));
+            return InstallTransaction.Run(path, restore, Release, restore ? null : ReadResource("ru.json"), keepBackup);
         }
 
         private static string ReadResource(string name)
@@ -98,7 +100,7 @@ namespace PcTogetherRus
             }
         }
 
-        internal static bool RunElevated(string path, bool restore)
+        internal static bool RunElevated(string path, bool restore, bool keepBackup)
         {
             if (path.IndexOf('"') >= 0)
             {
@@ -106,7 +108,7 @@ namespace PcTogetherRus
             }
             int closingSlashes = path.Length - path.TrimEnd('\\').Length;
             string arguments = "--show-result " + (restore ? "--restore" : "--install") + " \"" +
-                path + new string('\\', closingSlashes) + "\"";
+                path + new string('\\', closingSlashes) + "\"" + (restore || keepBackup ? "" : " --no-backup");
             using (var process = Process.Start(new ProcessStartInfo(Application.ExecutablePath, arguments)
             {
                 UseShellExecute = true,
@@ -125,6 +127,13 @@ namespace PcTogetherRus
         private readonly Button browse = new Button { Text = "Обзор…", AutoSize = true };
         private readonly Button install = new Button { Text = "Установить", AutoSize = true };
         private readonly Button restore = new Button { Text = "Восстановить оригинал", AutoSize = true };
+        private readonly CheckBox backup = new CheckBox
+        {
+            Text = "Создать резервную копию оригинальных файлов",
+            Checked = true,
+            AutoSize = true,
+            Margin = new Padding(3, 12, 3, 3)
+        };
         private readonly Label status = new Label { Dock = DockStyle.Fill };
         private bool busy;
 
@@ -132,14 +141,16 @@ namespace PcTogetherRus
         {
             Text = Setup.Title;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(565, 290);
-            MinimumSize = new Size(520, 315);
+            ClientSize = new Size(565, 330);
+            MinimumSize = new Size(520, 355);
             MaximizeBox = false;
             Font = new Font("Segoe UI", 10);
 
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 2, RowCount = 6 };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 2, RowCount = 8 };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -161,13 +172,20 @@ namespace PcTogetherRus
             AddRow(layout, new Label { Text = "Папка игры", AutoSize = true }, 2);
             layout.Controls.Add(folder, 0, 3);
             layout.Controls.Add(browse, 1, 3);
+            AddRow(layout, backup, 4);
+            AddRow(layout, new Label
+            {
+                Text = "Без копии оригиналы можно вернуть через Steam.",
+                AutoSize = true,
+                Margin = new Padding(3, 0, 3, 3)
+            }, 5);
             status.Margin = new Padding(3, 10, 3, 6);
-            AddRow(layout, status, 4);
+            AddRow(layout, status, 6);
 
             var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
             actions.Controls.Add(install);
             actions.Controls.Add(restore);
-            AddRow(layout, actions, 5);
+            AddRow(layout, actions, 7);
             Controls.Add(layout);
             AcceptButton = install;
 
@@ -210,6 +228,7 @@ namespace PcTogetherRus
                 folder.Focus();
                 return;
             }
+            bool keepBackup = backup.Checked;
             SetBusy(true);
             status.Text = restoreOriginal ? "Восстанавливаю файлы игры…" : "Проверяю файлы и устанавливаю перевод…";
             try
@@ -217,14 +236,14 @@ namespace PcTogetherRus
                 string fullPath = Path.GetFullPath(path);
                 try
                 {
-                    status.Text = await Task.Run(() => Setup.Run(fullPath, restoreOriginal));
+                    status.Text = await Task.Run(() => Setup.Run(fullPath, restoreOriginal, keepBackup));
                     return;
                 }
                 catch (UnauthorizedAccessException)
                 {
                     status.Text = "Windows запросит разрешение на запись в папку игры.";
                 }
-                bool success = await Task.Run(() => Setup.RunElevated(fullPath, restoreOriginal));
+                bool success = await Task.Run(() => Setup.RunElevated(fullPath, restoreOriginal, keepBackup));
                 status.Text = success ? "Готово." : "Действие завершилось с ошибкой.";
             }
             catch (Win32Exception error)
@@ -245,7 +264,7 @@ namespace PcTogetherRus
         private void SetBusy(bool value)
         {
             busy = value;
-            folder.Enabled = browse.Enabled = install.Enabled = restore.Enabled = !value;
+            folder.Enabled = browse.Enabled = install.Enabled = restore.Enabled = backup.Enabled = !value;
             UseWaitCursor = value;
         }
     }
