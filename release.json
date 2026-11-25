@@ -1,20 +1,25 @@
 {
-    "version":  "1.2.0",
+    "version":  "1.2.1",
     "steamAppId":  4990940,
     "steamBuildId":  26919223,
     "originalLocaleEntries":  4069,
-    "patchedAssetSha256":  "2F69E9A618C66563A2F144D99FC61B0A7FD97EDD5A468148FF89A386AFBD678D",
+    "patchedAssetSha256":  "7AADA67FAB77E7228ADEC55825B32205C1F87900C8FCED2CB568EE1ACF97E5E9",
     "patchedAssemblySha256":  "3E057142616DBC3D30AA80BFEFE43BD5DFF5DC80712A800D785411DAE1ECB66C",
     "previousPatches":  [
-        {
-            "version":  "1.1.2",
-            "patchedAssetSha256":  "7924F12C67023CF4A0A7C85823B34B9A255C4C1FD9EEF9F5D99A351C2C5E835F",
-            "patchedAssemblySha256":  "3E057142616DBC3D30AA80BFEFE43BD5DFF5DC80712A800D785411DAE1ECB66C"
-        },
-        {
-            "version":  "1.1.1",
-            "patchedAssetSha256":  "7924F12C67023CF4A0A7C85823B34B9A255C4C1FD9EEF9F5D99A351C2C5E835F",
-            "patchedAssemblySha256":  "3E057142616DBC3D30AA80BFEFE43BD5DFF5DC80712A800D785411DAE1ECB66C"
-        }
-    ]
+                            {
+                                "version":  "1.2.0",
+                                "patchedAssetSha256":  "2F69E9A618C66563A2F144D99FC61B0A7FD97EDD5A468148FF89A386AFBD678D",
+                                "patchedAssemblySha256":  "3E057142616DBC3D30AA80BFEFE43BD5DFF5DC80712A800D785411DAE1ECB66C"
+                            },
+                            {
+                                "version":  "1.1.2",
+                                "patchedAssetSha256":  "7924F12C67023CF4A0A7C85823B34B9A255C4C1FD9EEF9F5D99A351C2C5E835F",
+                                "patchedAssemblySha256":  "3E057142616DBC3D30AA80BFEFE43BD5DFF5DC80712A800D785411DAE1ECB66C"
+                            },
+                            {
+                                "version":  "1.1.1",
+                                "patchedAssetSha256":  "7924F12C67023CF4A0A7C85823B34B9A255C4C1FD9EEF9F5D99A351C2C5E835F",
+                                "patchedAssemblySha256":  "3E057142616DBC3D30AA80BFEFE43BD5DFF5DC80712A800D785411DAE1ECB66C"
+                            }
+                        ]
 }
