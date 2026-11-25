@@ -213,7 +213,6 @@ namespace PcTogetherRus
             }
             var files = new[] { locale, labels };
             var replaced = new List<GameFile>();
-            int fallbackCount = 0;
             try
             {
                 foreach (var file in files)
@@ -233,7 +232,7 @@ namespace PcTogetherRus
                     {
                         var dictionary = new JavaScriptSerializer().Deserialize<Translation[]>(russianJson).ToDictionary(
                             row => row.key, row => row.value, StringComparer.Ordinal);
-                        actual = compatible ? LocalePatch.BuildCompatible(source, file.Stage, dictionary, out fallbackCount)
+                        actual = compatible ? LocalePatch.BuildCompatible(source, file.Stage, dictionary)
                             : LocalePatch.Build(source, file.Stage, dictionary);
                     }
                     else
@@ -324,8 +323,7 @@ namespace PcTogetherRus
                 DeleteTemporaryFile(file.Previous);
             }
             return restore ? "Оригинальные файлы восстановлены." :
-                "Русификатор установлен. Запустите игру и выберите «Русский» в настройках языка." +
-                (fallbackCount == 0 ? "" : Environment.NewLine + "Строк на английском: " + fallbackCount + ".");
+                "Русификатор установлен. Запустите игру и выберите «Русский» в настройках языка.";
         }
 
         private static bool IsCompatibilityError(Exception error)

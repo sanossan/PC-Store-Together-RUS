@@ -149,18 +149,16 @@ namespace PcTogetherRus
         public static string Build(string originalPath, string outputPath, Dictionary<string, string> russian)
         {
             Require(FileHash(originalPath) == OriginalHash, "Не совпадает контрольная сумма исходного ресурса игры.");
-            int fallbackCount;
-            return BuildResource(originalPath, outputPath, russian, false, out fallbackCount);
+            return BuildResource(originalPath, outputPath, russian, false);
         }
 
-        internal static string BuildCompatible(string originalPath, string outputPath,
-            Dictionary<string, string> russian, out int fallbackCount)
+        internal static string BuildCompatible(string originalPath, string outputPath, Dictionary<string, string> russian)
         {
-            return BuildResource(originalPath, outputPath, russian, true, out fallbackCount);
+            return BuildResource(originalPath, outputPath, russian, true);
         }
 
         private static string BuildResource(string originalPath, string outputPath, Dictionary<string, string> russian,
-            bool compatible, out int fallbackCount)
+            bool compatible)
         {
             byte[] original = File.ReadAllBytes(originalPath);
             var asset = new Asset(original);
@@ -186,7 +184,7 @@ namespace PcTogetherRus
             byte[] english = asset.ReadObject(original, englishId);
             byte[] catalog = asset.ReadObject(original, catalogId);
             byte[] newCatalog = BuildCatalog(catalog, englishId, russianId, compatible ? asset : null, original, ref order);
-            var tables = BuildLocales(english, russian, compatible, order, out fallbackCount);
+            var tables = BuildLocales(english, russian, compatible, order);
             byte[] locale = tables[0];
             byte[] newEnglish = tables[1];
             int dataSize = original.Length - asset.DataOffset;
@@ -247,9 +245,8 @@ namespace PcTogetherRus
         }
 
         private static byte[][] BuildLocales(byte[] english, Dictionary<string, string> russian,
-            bool compatible, int order, out int fallbackCount)
+            bool compatible, int order)
         {
-            fallbackCount = 0;
             using (var source = Reader(english))
             using (var englishResult = new MemoryStream())
             using (var russianResult = new MemoryStream())
@@ -282,7 +279,6 @@ namespace PcTogetherRus
                     {
                         Require(compatible, "Отсутствует или несовместим перевод строки: " + key);
                         translation = original;
-                        fallbackCount++;
                     }
                     WriteString(englishWriter, key);
                     WriteString(englishWriter, original);
