@@ -11,13 +11,14 @@ namespace PcTogetherRus
     public static class LocalePatch
     {
         public const string AssetName = "sharedassets1.assets";
-        public const string OriginalHash = "1933E381018CCD2C68D19315A8583A3212B473C0837DEC72AF460818DEAD9629";
-        public const string AssemblyHash = "D6FCCC38DC44A6EC90892714A1BF15217DA947F8818321EC135AE5414A159586";
-        public const int EntryCount = 4060;
+        public const string OriginalHash = "BDF7D28ADC4F00C84E81F689A05D58D2967928513A97B62863FB439C532B8BE9";
+        public const string AssemblyHash = "861859305AAF6CDC7A5E4A2AACB2AF3DED89DD2C7E9DBC1A42DE31FD0ABC4B32";
+        public const int EntryCount = 4069;
 
-        private const long EnglishId = 5886;
-        private const long CatalogId = 5966;
-        private const long RussianId = 8313;
+        private const long EnglishId = 5880;
+        private const long CatalogId = 5960;
+        private const long RussianId = 8307;
+        private const int OriginalObjectCount = 8306;
         private const int HeaderSize = 48;
         private const int RowSize = 24;
         private const int BehaviourHeaderSize = 28;
@@ -177,7 +178,8 @@ namespace PcTogetherRus
             }
             else
             {
-                Require(asset.Objects.Count == 8312 && asset.Objects[8312].Position + RowSize == asset.TableEnd &&
+                Require(asset.Objects.Count == OriginalObjectCount &&
+                    asset.Objects[RussianId - 1].Position + RowSize == asset.TableEnd &&
                     !asset.Objects.ContainsKey(RussianId), "Не совпадает список объектов исходного ресурса.");
             }
 

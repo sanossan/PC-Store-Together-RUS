@@ -15,15 +15,10 @@ namespace PcTogetherRus
             {
                 throw new InvalidDataException("Не совпадает исходная сборка игрового кода.");
             }
-            return BuildAssembly(originalPath, outputPath, false);
+            return BuildCompatible(originalPath, outputPath);
         }
 
         internal static string BuildCompatible(string originalPath, string outputPath)
-        {
-            return BuildAssembly(originalPath, outputPath, true);
-        }
-
-        private static string BuildAssembly(string originalPath, string outputPath, bool compatible)
         {
             using (var resolver = new DefaultAssemblyResolver())
             {
@@ -32,13 +27,9 @@ namespace PcTogetherRus
                 using (var module = ModuleDefinition.ReadModule(originalPath, parameters))
                 {
                     var loc = module.GetType("PcStore.Localization.Loc");
-                    if (compatible)
-                    {
-                        CheckLocaleSchema(module);
-                    }
-                    PatchSearch(module.GetType("PcStore.Interaction.PartBrowserUI"), FindTranslator(loc, "Get"), compatible);
-                    PatchPlaylist(module.GetType("Michsky.DreamOS.MusicPlayerManager"), FindTranslator(loc, "TranslateSource"),
-                        compatible);
+                    CheckLocaleSchema(module);
+                    PatchSearch(module.GetType("PcStore.Interaction.PartBrowserUI"), FindTranslator(loc, "Get"));
+                    PatchPlaylist(module.GetType("Michsky.DreamOS.MusicPlayerManager"), FindTranslator(loc, "TranslateSource"));
 
                     using (var stream = new FileStream(outputPath, FileMode.CreateNew))
                     {
@@ -58,7 +49,7 @@ namespace PcTogetherRus
             return LocalePatch.FileHash(outputPath);
         }
 
-        private static void PatchSearch(TypeDefinition browser, MethodDefinition get, bool compatible)
+        private static void PatchSearch(TypeDefinition browser, MethodDefinition get)
         {
             Require(browser != null, "В игровом коде отсутствует окно поиска деталей.");
             var searchField = browser.Fields.SingleOrDefault(field => field.Name == "searchField");
@@ -81,14 +72,11 @@ namespace PcTogetherRus
                 "Изменилась сигнатура поля подсказки поиска.");
             var getPlaceholder = new MethodReference("get_placeholder", setPlaceholder.Parameters[0].ParameterType,
                 searchField.FieldType) { HasThis = true };
-            if (compatible)
-            {
-                var fieldType = searchField.FieldType.Resolve();
-                Require(fieldType != null && fieldType.Methods.Any(method => method.Name == "get_placeholder" &&
-                    method.IsPublic && method.HasThis && method.Parameters.Count == 0 &&
-                    method.ReturnType.FullName == getPlaceholder.ReturnType.FullName),
-                    "Изменилась сигнатура чтения подсказки поиска.");
-            }
+            var fieldType = searchField.FieldType.Resolve();
+            Require(fieldType != null && fieldType.Methods.Any(method => method.Name == "get_placeholder" &&
+                method.IsPublic && method.HasThis && method.Parameters.Count == 0 &&
+                method.ReturnType.FullName == getPlaceholder.ReturnType.FullName),
+                "Изменилась сигнатура чтения подсказки поиска.");
 
             var open = FindMethod(browser, "Open", 4);
             Require(!open.IsStatic && open.ReturnType.FullName == "System.Void" &&
@@ -97,29 +85,23 @@ namespace PcTogetherRus
             var il = open.Body.GetILProcessor();
             var first = open.Body.Instructions[0];
             var key = il.Create(OpCodes.Ldstr, "copy.search");
-            if (compatible)
-            {
-                il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
-                il.InsertBefore(first, il.Create(OpCodes.Ldfld, searchField));
-                il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
-            }
+            il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+            il.InsertBefore(first, il.Create(OpCodes.Ldfld, searchField));
+            il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
             il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
             il.InsertBefore(first, il.Create(OpCodes.Ldfld, searchField));
             il.InsertBefore(first, il.Create(OpCodes.Callvirt, getPlaceholder));
-            il.InsertBefore(first, il.Create(compatible ? OpCodes.Isinst : OpCodes.Castclass, setText.DeclaringType));
-            if (compatible)
-            {
-                il.InsertBefore(first, il.Create(OpCodes.Dup));
-                il.InsertBefore(first, il.Create(OpCodes.Brtrue, key));
-                il.InsertBefore(first, il.Create(OpCodes.Pop));
-                il.InsertBefore(first, il.Create(OpCodes.Br, first));
-            }
+            il.InsertBefore(first, il.Create(OpCodes.Isinst, setText.DeclaringType));
+            il.InsertBefore(first, il.Create(OpCodes.Dup));
+            il.InsertBefore(first, il.Create(OpCodes.Brtrue, key));
+            il.InsertBefore(first, il.Create(OpCodes.Pop));
+            il.InsertBefore(first, il.Create(OpCodes.Br, first));
             il.InsertBefore(first, key);
             il.InsertBefore(first, il.Create(OpCodes.Call, get));
             il.InsertBefore(first, il.Create(OpCodes.Callvirt, setText));
         }
 
-        private static void PatchPlaylist(TypeDefinition player, MethodDefinition translate, bool compatible)
+        private static void PatchPlaylist(TypeDefinition player, MethodDefinition translate)
         {
             var method = FindMethod(player, "PlayCustomClip", 4);
             var il = method.Body.GetILProcessor();
@@ -133,10 +115,7 @@ namespace PcTogetherRus
                 IsSetter(literal.Next, "TMPro.TMP_Text", "text", "System.String"),
                 "Изменился или уже пропатчен код названия списка воспроизведения.");
             il.InsertAfter(literal, il.Create(OpCodes.Call, translate));
-            if (compatible)
-            {
-                CheckShortBranches(method);
-            }
+            CheckShortBranches(method);
         }
 
         private static void CheckShortBranches(MethodDefinition method)
