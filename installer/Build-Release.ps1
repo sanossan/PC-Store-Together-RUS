@@ -21,6 +21,7 @@ $cecil = Join-Path $root 'lib\Mono.Cecil.dll'
 Add-Type -Path $cecil
 $sources = @(
     (Join-Path $root 'PcStoreLocale.cs'),
+    (Join-Path $root 'UnityFsBundle.cs'),
     (Join-Path $root 'PcStoreLabels.cs'),
     (Join-Path $PSScriptRoot 'InstallTransaction.cs')
 )
@@ -39,7 +40,7 @@ $dist = (New-Item -ItemType Directory -Path (Join-Path $root 'dist') -Force).Ful
 $stage = (New-Item -ItemType Directory -Path (Join-Path $dist ('.release-' + [guid]::NewGuid().ToString('N')))).FullName
 try {
     $assetHash = [PcTogetherRus.LocalePatch]::Build(
-        (Join-Path $data ([PcTogetherRus.LocalePatch]::AssetName)), (Join-Path $stage 'patched.assets'), $dictionary)
+        (Join-Path $data ([PcTogetherRus.LocalePatch]::AssetName)), (Join-Path $stage 'patched.unity3d'), $dictionary)
     $assemblyHash = [PcTogetherRus.LabelPatch]::Build(
         (Join-Path $data 'Managed\Assembly-CSharp.dll'), (Join-Path $stage 'patched.dll'))
     $refreshManifest = $release.patchedAssetSha256 -cne $assetHash -or $release.patchedAssemblySha256 -cne $assemblyHash
@@ -60,6 +61,7 @@ try {
         'README.md',
         'Install-Russian.ps1',
         'PcStoreLocale.cs',
+        'UnityFsBundle.cs',
         'PcStoreLabels.cs',
         'installer/InstallTransaction.cs',
         'ru.json',

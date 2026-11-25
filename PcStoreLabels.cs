@@ -9,6 +9,10 @@ namespace PcTogetherRus
 {
     public static class LabelPatch
     {
+        private const string HoldHudType = "PcStore.Player.InteractionHud";
+        private const string LocType = "PcStore.Localization.Loc";
+        private const string LowerHoldAction = "LowerRussianHoldAction";
+
         public static string Build(string originalPath, string outputPath)
         {
             if (LocalePatch.FileHash(originalPath) != LocalePatch.AssemblyHash)
@@ -26,10 +30,11 @@ namespace PcTogetherRus
                 var parameters = new ReaderParameters { AssemblyResolver = resolver, InMemory = true };
                 using (var module = ModuleDefinition.ReadModule(originalPath, parameters))
                 {
-                    var loc = module.GetType("PcStore.Localization.Loc");
+                    var loc = module.GetType(LocType);
                     CheckLocaleSchema(module);
                     PatchSearch(module.GetType("PcStore.Interaction.PartBrowserUI"), FindTranslator(loc, "Get"));
                     PatchPlaylist(module.GetType("Michsky.DreamOS.MusicPlayerManager"), FindTranslator(loc, "TranslateSource"));
+                    PatchHoldHint(module, FindCurrentCode(loc));
 
                     using (var stream = new FileStream(outputPath, FileMode.CreateNew))
                     {
@@ -45,6 +50,9 @@ namespace PcTogetherRus
                 Require(HasTranslation(FindMethod(browser, "Open", 4), "copy.search", "Get", "UnityEngine.UI.Text") &&
                     HasTranslation(FindMethod(player, "PlayCustomClip", 4), "Custom", "TranslateSource", "TMPro.TMP_Text"),
                     "Проверка подписей поиска и медиаплеера не пройдена.");
+                var hud = patched.GetType(HoldHudType);
+                FindHoldActionLoad(FindMethod(hud, "Show", 2), FindCurrentCode(patched.GetType(LocType)),
+                    FindMethod(hud, LowerHoldAction, 2));
             }
             return LocalePatch.FileHash(outputPath);
         }
@@ -118,6 +126,135 @@ namespace PcTogetherRus
             CheckShortBranches(method);
         }
 
+        private static void PatchHoldHint(ModuleDefinition module, MethodDefinition currentCode)
+        {
+            var hud = module.GetType(HoldHudType);
+            var show = FindMethod(hud, "Show", 2);
+            var label = FindHoldActionLoad(show, currentCode, null);
+            Require(!hud.Methods.Any(method => method.Name == LowerHoldAction),
+                "В игровом коде уже есть метод форматирования русской подсказки удержания.");
+
+            var lower = CreateHoldActionNormalizer(module.TypeSystem);
+            hud.Methods.Add(lower);
+            var il = show.Body.GetILProcessor();
+            var storeArgument = label.Next;
+            il.InsertBefore(storeArgument, il.Create(OpCodes.Call, currentCode));
+            il.InsertBefore(storeArgument, il.Create(OpCodes.Call, lower));
+            CheckShortBranches(show);
+        }
+
+        private static Instruction FindHoldActionLoad(MethodDefinition show, MethodDefinition currentCode, MethodDefinition lower)
+        {
+            const string error = "Изменился код подсказки удержания кнопки.";
+            var instructions = show.Body.Instructions;
+            var literals = instructions.Where(instruction => IsLiteral(instruction, "hint.hold")).ToArray();
+            Require(literals.Length == 1, error);
+            var key = literals[0];
+            int index = instructions.IndexOf(key);
+            int storeIndex = index + (lower == null ? 6 : 8);
+            Require(index >= 4 && storeIndex + 2 < instructions.Count, error);
+
+            var hold = instructions[index - 4];
+            var holdField = hold.Operand as FieldReference;
+            var whenHeld = instructions[index - 3];
+            var plainLabel = instructions[index - 2];
+            var skipFormat = instructions[index - 1];
+            var label = instructions[index + 5];
+            var arrayType = instructions[index + 2].Operand as TypeReference;
+            var format = instructions[storeIndex + 1];
+            var formatMethod = format.Operand as MethodReference;
+            var setter = instructions[storeIndex + 2];
+            var local = label.Operand as VariableDefinition;
+            Require(hold.OpCode == OpCodes.Ldfld && holdField != null && holdField.Name == "hold" &&
+                holdField.DeclaringType.FullName == "PcStore.Player.InteractionHint" &&
+                holdField.FieldType.FullName == "System.Boolean" &&
+                (whenHeld.OpCode == OpCodes.Brtrue || whenHeld.OpCode == OpCodes.Brtrue_S) && whenHeld.Operand == key &&
+                skipFormat.OpCode.FlowControl == FlowControl.Branch && skipFormat.Operand == setter &&
+                local != null && local.VariableType.FullName == "System.String" &&
+                (label.OpCode == OpCodes.Ldloc || label.OpCode == OpCodes.Ldloc_S) &&
+                (plainLabel.OpCode == OpCodes.Ldloc || plainLabel.OpCode == OpCodes.Ldloc_S) && plainLabel.Operand == local &&
+                instructions[index + 1].OpCode == OpCodes.Ldc_I4_1 && instructions[index + 2].OpCode == OpCodes.Newarr &&
+                arrayType != null && arrayType.FullName == "System.Object" &&
+                instructions[index + 3].OpCode == OpCodes.Dup && instructions[index + 4].OpCode == OpCodes.Ldc_I4_0 &&
+                instructions[storeIndex].OpCode == OpCodes.Stelem_Ref &&
+                format.OpCode == OpCodes.Call && formatMethod != null &&
+                formatMethod.FullName == "System.String PcStore.Shop.StoreText::Format(System.String,System.Object[])" &&
+                IsSetter(setter, "TMPro.TMP_Text", "text", "System.String"), error);
+            if (lower != null)
+            {
+                Require(label.Next.OpCode == OpCodes.Call && label.Next.Operand == currentCode &&
+                    label.Next.Next.OpCode == OpCodes.Call && label.Next.Next.Operand == lower,
+                    "Проверка русской подсказки удержания кнопки не пройдена.");
+            }
+            return label;
+        }
+
+        private static MethodDefinition CreateHoldActionNormalizer(TypeSystem types)
+        {
+            var method = new MethodDefinition(LowerHoldAction, MethodAttributes.Private | MethodAttributes.Static, types.String);
+            method.Parameters.Add(new ParameterDefinition("label", ParameterAttributes.None, types.String));
+            method.Parameters.Add(new ParameterDefinition("localeCode", ParameterAttributes.None, types.String));
+            var il = method.Body.GetILProcessor();
+            var unchanged = il.Create(OpCodes.Ldarg_0);
+            var lowerInitial = il.Create(OpCodes.Ldloc_0);
+            var initial = new VariableDefinition(types.Char);
+            method.Body.Variables.Add(initial);
+            method.Body.InitLocals = true;
+
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldstr, "ru");
+            il.Emit(OpCodes.Call, CoreMethod(types.String, "op_Equality", types.Boolean, false, types.String, types.String));
+            il.Emit(OpCodes.Brfalse_S, unchanged);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call, CoreMethod(types.String, "IsNullOrEmpty", types.Boolean, false, types.String));
+            il.Emit(OpCodes.Brtrue_S, unchanged);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4_0);
+            il.Emit(OpCodes.Callvirt, CoreMethod(types.String, "get_Chars", types.Char, true, types.Int32));
+            il.Emit(OpCodes.Stloc_0);
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Ldc_I4, (int)'Ё');
+            il.Emit(OpCodes.Beq_S, lowerInitial);
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Ldc_I4, (int)'А');
+            il.Emit(OpCodes.Blt_S, unchanged);
+            il.Emit(OpCodes.Ldloc_0);
+            il.Emit(OpCodes.Ldc_I4, (int)'Я');
+            il.Emit(OpCodes.Bgt_S, unchanged);
+
+            il.Append(lowerInitial);
+            il.Emit(OpCodes.Call, CoreMethod(types.Char, "ToLowerInvariant", types.Char, false, types.Char));
+            il.Emit(OpCodes.Call, CoreMethod(types.Char, "ToString", types.String, false, types.Char));
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4_1);
+            il.Emit(OpCodes.Callvirt, CoreMethod(types.String, "Substring", types.String, true, types.Int32));
+            il.Emit(OpCodes.Call, CoreMethod(types.String, "Concat", types.String, false, types.String, types.String));
+            il.Emit(OpCodes.Ret);
+            il.Append(unchanged);
+            il.Emit(OpCodes.Ret);
+            return method;
+        }
+
+        private static MethodReference CoreMethod(TypeReference type, string name, TypeReference result, bool hasThis,
+            params TypeReference[] arguments)
+        {
+            var method = new MethodReference(name, result, type) { HasThis = hasThis };
+            foreach (var argument in arguments)
+            {
+                method.Parameters.Add(new ParameterDefinition(argument));
+            }
+            return method;
+        }
+
+        private static MethodDefinition FindCurrentCode(TypeDefinition loc)
+        {
+            var method = FindMethod(loc, "get_CurrentCode", 0);
+            Require(method.IsStatic && method.IsPublic && method.ReturnType.FullName == "System.String",
+                "Изменилась сигнатура чтения текущей локали.");
+            return method;
+        }
+
         private static void CheckShortBranches(MethodDefinition method)
         {
             var offsets = new Dictionary<Instruction, int>();
@@ -131,7 +268,7 @@ namespace PcTogetherRus
             {
                 int distance = offsets[(Instruction)branch.Operand] - offsets[branch] - branch.GetSize();
                 Require(distance >= SByte.MinValue && distance <= SByte.MaxValue,
-                    "Переход в коде списка воспроизведения выходит за допустимый диапазон.");
+                    "Переход в игровом методе " + method.FullName + " выходит за допустимый диапазон.");
             }
         }
 
@@ -200,7 +337,7 @@ namespace PcTogetherRus
         {
             var method = instruction == null ? null : instruction.Operand as MethodReference;
             return method != null && instruction.OpCode == OpCodes.Call &&
-                method.Name == name && method.DeclaringType.FullName == "PcStore.Localization.Loc";
+                method.Name == name && method.DeclaringType.FullName == LocType;
         }
 
         private static void Require(bool condition, string message)

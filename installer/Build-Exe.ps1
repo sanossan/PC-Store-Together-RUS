@@ -19,6 +19,9 @@ if ($version.Build -lt 0 -or $version.Revision -ge 0 -or $version.ToString(3) -c
 if ($release.steamBuildId -isnot [int] -and $release.steamBuildId -isnot [long]) {
     throw 'release.json must have a numeric steamBuildId.'
 }
+if ($release.gameVersion -isnot [string] -or [string]::IsNullOrWhiteSpace($release.gameVersion)) {
+    throw 'release.json must have a gameVersion from PlayerSettings.bundleVersion.'
+}
 $outputFolder = (New-Item -ItemType Directory -Path $OutputDirectory -Force).FullName
 $output = Join-Path $outputFolder "PC-TOGETHER-RUS-v$version-Setup.exe"
 $cecil = Join-Path $root 'lib\Mono.Cecil.dll'
@@ -42,6 +45,7 @@ $options = @(
     "/resource:$ManifestPath,release.json",
     (Join-Path $root 'PcStoreLabels.cs'),
     (Join-Path $root 'PcStoreLocale.cs'),
+    (Join-Path $root 'UnityFsBundle.cs'),
     (Join-Path $PSScriptRoot 'InstallTransaction.cs'),
     (Join-Path $PSScriptRoot 'Setup.cs'),
     $assemblyInfo

@@ -13,6 +13,7 @@ namespace PcTogetherRus
     public sealed class ReleaseManifest
     {
         public string version { get; set; }
+        public string gameVersion { get; set; }
         public int steamAppId { get; set; }
         public long steamBuildId { get; set; }
         public string patchedAssetSha256 { get; set; }

@@ -22,6 +22,7 @@ if (-not ('PcTogetherRus.InstallTransaction' -as [type])) {
     Add-Type -Path $cecil
     $sources = @(
         (Join-Path $PSScriptRoot 'PcStoreLocale.cs'),
+        (Join-Path $PSScriptRoot 'UnityFsBundle.cs'),
         (Join-Path $PSScriptRoot 'PcStoreLabels.cs'),
         (Join-Path $PSScriptRoot 'installer\InstallTransaction.cs')
     )

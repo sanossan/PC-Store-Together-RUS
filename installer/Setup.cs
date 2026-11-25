@@ -154,7 +154,7 @@ namespace PcTogetherRus
             }, 0);
             AddRow(layout, new Label
             {
-                Text = "Steam-сборка " + Setup.Release.steamBuildId + " и новее при совместимости",
+                Text = "Для игры v" + Setup.Release.gameVersion + " и более новых совместимых версий",
                 AutoSize = true,
                 Margin = new Padding(3, 0, 3, 14)
             }, 1);

@@ -10,10 +10,10 @@ namespace PcTogetherRus
 {
     public static class LocalePatch
     {
-        public const string AssetName = "sharedassets1.assets";
-        public const string OriginalHash = "BDF7D28ADC4F00C84E81F689A05D58D2967928513A97B62863FB439C532B8BE9";
-        public const string AssemblyHash = "861859305AAF6CDC7A5E4A2AACB2AF3DED89DD2C7E9DBC1A42DE31FD0ABC4B32";
-        public const int EntryCount = 4069;
+        public const string AssetName = "data.unity3d";
+        public const string OriginalHash = "B7DB0E81A67E67EA03FE43082E0E1ED5D2E160E0AD07395B6EFD0E7A2161A5D2";
+        public const string AssemblyHash = "0C3DA42DBAC08CF49D4E4EAC1DF78EB617F1E8D7BA48C0B5FE54294D94306556";
+        public const int EntryCount = 4072;
 
         private const long EnglishId = 5880;
         private const long CatalogId = 5960;
@@ -150,18 +150,38 @@ namespace PcTogetherRus
         public static string Build(string originalPath, string outputPath, Dictionary<string, string> russian)
         {
             Require(FileHash(originalPath) == OriginalHash, "Не совпадает контрольная сумма исходного ресурса игры.");
-            return BuildResource(originalPath, outputPath, russian, false);
+            return BuildArchive(originalPath, outputPath, russian, false);
         }
 
         internal static string BuildCompatible(string originalPath, string outputPath, Dictionary<string, string> russian)
         {
-            return BuildResource(originalPath, outputPath, russian, true);
+            return BuildArchive(originalPath, outputPath, russian, true);
         }
 
-        private static string BuildResource(string originalPath, string outputPath, Dictionary<string, string> russian,
+        private static string BuildArchive(string originalPath, string outputPath, Dictionary<string, string> russian,
             bool compatible)
         {
-            byte[] original = File.ReadAllBytes(originalPath);
+            byte[] patched;
+            using (var source = File.OpenRead(originalPath))
+            {
+                var bundle = new UnityFsBundle(source);
+                patched = BuildResource(bundle.ReadLocale(), russian, compatible);
+                using (var output = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    bundle.WriteWithLocale(output, patched);
+                    output.Flush(true);
+                }
+            }
+            using (var output = File.OpenRead(outputPath))
+            {
+                Require(new UnityFsBundle(output).ReadLocale().SequenceEqual(patched),
+                    "Проверка ресурса внутри архива игры не пройдена.");
+            }
+            return FileHash(outputPath);
+        }
+
+        private static byte[] BuildResource(byte[] original, Dictionary<string, string> russian, bool compatible)
+        {
             var asset = new Asset(original);
             long englishId = EnglishId;
             long catalogId = CatalogId;
@@ -201,7 +221,8 @@ namespace PcTogetherRus
                 length = dataOffset + localeOffset + locale.Length;
             }
 
-            using (var output = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            var patched = new byte[length];
+            using (var output = new MemoryStream(patched))
             using (var writer = new BinaryWriter(output, Utf8))
             {
                 writer.Write(original, 0, asset.TableEnd);
@@ -231,11 +252,8 @@ namespace PcTogetherRus
                 output.Position = asset.Objects[englishId].Position + sizeof(long);
                 writer.Write((long)englishOffset);
                 writer.Write(newEnglish.Length);
-                writer.Flush();
-                output.Flush(true);
             }
 
-            byte[] patched = File.ReadAllBytes(outputPath);
             var check = new Asset(patched);
             Require(check.Objects.Count == asset.Objects.Count + 1 &&
                     check.Objects[russianId].Type == asset.Objects[englishId].Type &&
@@ -243,7 +261,7 @@ namespace PcTogetherRus
                     check.ReadObject(patched, catalogId).SequenceEqual(newCatalog) &&
                     check.ReadObject(patched, englishId).SequenceEqual(newEnglish),
                 "Проверка подготовленного ресурса не пройдена.");
-            return FileHash(outputPath);
+            return patched;
         }
 
         private static byte[][] BuildLocales(byte[] english, Dictionary<string, string> russian,
