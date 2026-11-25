@@ -29,7 +29,7 @@ using System.Reflection;
 [assembly: AssemblyVersion("$assemblyVersion")]
 [assembly: AssemblyFileVersion("$assemblyVersion")]
 [assembly: AssemblyInformationalVersion("$version")]
-[assembly: AssemblyDescription("PC Store Together Russian localization for Steam build $($release.steamBuildId)")]
+[assembly: AssemblyDescription("PC Store Together Russian localization for Steam build $($release.steamBuildId) and compatible newer builds")]
 "@
 
 $options = @(

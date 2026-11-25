@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Mono.Cecil;
@@ -14,7 +15,16 @@ namespace PcTogetherRus
             {
                 throw new InvalidDataException("Не совпадает исходная сборка игрового кода.");
             }
+            return BuildAssembly(originalPath, outputPath, false);
+        }
 
+        internal static string BuildCompatible(string originalPath, string outputPath)
+        {
+            return BuildAssembly(originalPath, outputPath, true);
+        }
+
+        private static string BuildAssembly(string originalPath, string outputPath, bool compatible)
+        {
             using (var resolver = new DefaultAssemblyResolver())
             {
                 resolver.AddSearchDirectory(Path.GetDirectoryName(originalPath));
@@ -22,8 +32,13 @@ namespace PcTogetherRus
                 using (var module = ModuleDefinition.ReadModule(originalPath, parameters))
                 {
                     var loc = module.GetType("PcStore.Localization.Loc");
-                    PatchSearch(module.GetType("PcStore.Interaction.PartBrowserUI"), FindMethod(loc, "Get", 1));
-                    PatchPlaylist(module.GetType("Michsky.DreamOS.MusicPlayerManager"), FindMethod(loc, "TranslateSource", 1));
+                    if (compatible)
+                    {
+                        CheckLocaleSchema(module);
+                    }
+                    PatchSearch(module.GetType("PcStore.Interaction.PartBrowserUI"), FindTranslator(loc, "Get"), compatible);
+                    PatchPlaylist(module.GetType("Michsky.DreamOS.MusicPlayerManager"), FindTranslator(loc, "TranslateSource"),
+                        compatible);
 
                     using (var stream = new FileStream(outputPath, FileMode.CreateNew))
                     {
@@ -36,59 +51,185 @@ namespace PcTogetherRus
             {
                 var browser = patched.GetType("PcStore.Interaction.PartBrowserUI");
                 var player = patched.GetType("Michsky.DreamOS.MusicPlayerManager");
-                if (!FindMethod(browser, "Open", 4).Body.Instructions.Any(i => HasCall(i, "Get")) ||
-                    !FindMethod(player, "PlayCustomClip", 4).Body.Instructions.Any(i => HasCall(i, "TranslateSource")))
-                {
-                    throw new InvalidDataException("Проверка подписей поиска и медиаплеера не пройдена.");
-                }
+                Require(HasTranslation(FindMethod(browser, "Open", 4), "copy.search", "Get", "UnityEngine.UI.Text") &&
+                    HasTranslation(FindMethod(player, "PlayCustomClip", 4), "Custom", "TranslateSource", "TMPro.TMP_Text"),
+                    "Проверка подписей поиска и медиаплеера не пройдена.");
             }
             return LocalePatch.FileHash(outputPath);
         }
 
-        private static void PatchSearch(TypeDefinition browser, MethodDefinition get)
+        private static void PatchSearch(TypeDefinition browser, MethodDefinition get, bool compatible)
         {
-            var searchField = browser.Fields.Single(field => field.Name == "searchField");
-            var initialization = browser.Methods.Where(method => method.HasBody).Single(method =>
-                method.Body.Instructions.Any(i => i.OpCode == OpCodes.Ldstr && (string)i.Operand == "search..."));
-            var literal = initialization.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldstr &&
-                (string)i.Operand == "search...");
+            Require(browser != null, "В игровом коде отсутствует окно поиска деталей.");
+            var searchField = browser.Fields.SingleOrDefault(field => field.Name == "searchField");
+            var initializers = browser.Methods.Where(method => method.HasBody).Where(method =>
+                method.Body.Instructions.Any(i => IsLiteral(i, "search..."))).ToArray();
+            Require(initializers.Length == 1 && initializers[0].Name == "BuildSearchField",
+                "Не найден код создания подсказки поиска деталей.");
+            var initialization = initializers[0];
+            var literals = initialization.Body.Instructions.Where(i => IsLiteral(i, "search...")).ToArray();
+            Require(searchField != null && literals.Length == 1, "Изменился код подсказки поиска деталей.");
+            var literal = literals[0];
+            Require(!searchField.IsStatic && searchField.FieldType.FullName == "UnityEngine.UI.InputField" &&
+                IsSetter(literal.Next, "UnityEngine.UI.Text", "text", "System.String"),
+                "Изменился код подсказки поиска деталей.");
             var setText = (MethodReference)literal.Next.Operand;
             var setPlaceholder = initialization.Body.Instructions.Select(i => i.Operand).OfType<MethodReference>()
                 .Single(method => method.Name == "set_placeholder" && method.DeclaringType.FullName == searchField.FieldType.FullName);
+            Require(setPlaceholder.HasThis && setPlaceholder.ReturnType.FullName == "System.Void" &&
+                setPlaceholder.Parameters.Count == 1 && setPlaceholder.Parameters[0].ParameterType.FullName == "UnityEngine.UI.Graphic",
+                "Изменилась сигнатура поля подсказки поиска.");
             var getPlaceholder = new MethodReference("get_placeholder", setPlaceholder.Parameters[0].ParameterType,
                 searchField.FieldType) { HasThis = true };
+            if (compatible)
+            {
+                var fieldType = searchField.FieldType.Resolve();
+                Require(fieldType != null && fieldType.Methods.Any(method => method.Name == "get_placeholder" &&
+                    method.IsPublic && method.HasThis && method.Parameters.Count == 0 &&
+                    method.ReturnType.FullName == getPlaceholder.ReturnType.FullName),
+                    "Изменилась сигнатура чтения подсказки поиска.");
+            }
 
             var open = FindMethod(browser, "Open", 4);
+            Require(!open.IsStatic && open.ReturnType.FullName == "System.Void" &&
+                !open.Body.Instructions.Any(i => HasCall(i, "Get") && IsLiteral(i.Previous, "copy.search")),
+                "Изменился или уже пропатчен код открытия поиска деталей.");
             var il = open.Body.GetILProcessor();
             var first = open.Body.Instructions[0];
-            // Build creates a Text placeholder before Open can be called.
+            var key = il.Create(OpCodes.Ldstr, "copy.search");
+            if (compatible)
+            {
+                il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+                il.InsertBefore(first, il.Create(OpCodes.Ldfld, searchField));
+                il.InsertBefore(first, il.Create(OpCodes.Brfalse, first));
+            }
             il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
             il.InsertBefore(first, il.Create(OpCodes.Ldfld, searchField));
             il.InsertBefore(first, il.Create(OpCodes.Callvirt, getPlaceholder));
-            il.InsertBefore(first, il.Create(OpCodes.Castclass, setText.DeclaringType));
-            il.InsertBefore(first, il.Create(OpCodes.Ldstr, "copy.search"));
+            il.InsertBefore(first, il.Create(compatible ? OpCodes.Isinst : OpCodes.Castclass, setText.DeclaringType));
+            if (compatible)
+            {
+                il.InsertBefore(first, il.Create(OpCodes.Dup));
+                il.InsertBefore(first, il.Create(OpCodes.Brtrue, key));
+                il.InsertBefore(first, il.Create(OpCodes.Pop));
+                il.InsertBefore(first, il.Create(OpCodes.Br, first));
+            }
+            il.InsertBefore(first, key);
             il.InsertBefore(first, il.Create(OpCodes.Call, get));
             il.InsertBefore(first, il.Create(OpCodes.Callvirt, setText));
         }
 
-        private static void PatchPlaylist(TypeDefinition player, MethodDefinition translate)
+        private static void PatchPlaylist(TypeDefinition player, MethodDefinition translate, bool compatible)
         {
             var method = FindMethod(player, "PlayCustomClip", 4);
             var il = method.Body.GetILProcessor();
-            var literal = method.Body.Instructions.Single(i => i.OpCode == OpCodes.Ldstr && (string)i.Operand == "Custom");
+            var literals = method.Body.Instructions.Where(i => IsLiteral(i, "Custom")).ToArray();
+            Require(literals.Length == 1, "Не найдена однозначная точка перевода названия списка воспроизведения.");
+            var literal = literals[0];
+            var field = literal.Previous == null ? null : literal.Previous.Operand as FieldReference;
+            Require(!method.IsStatic && method.ReturnType.FullName == "System.Void" &&
+                field != null && literal.Previous.OpCode == OpCodes.Ldfld &&
+                field.Name == "nowPlayingListTitle" && field.DeclaringType.FullName == player.FullName &&
+                IsSetter(literal.Next, "TMPro.TMP_Text", "text", "System.String"),
+                "Изменился или уже пропатчен код названия списка воспроизведения.");
             il.InsertAfter(literal, il.Create(OpCodes.Call, translate));
+            if (compatible)
+            {
+                CheckShortBranches(method);
+            }
+        }
+
+        private static void CheckShortBranches(MethodDefinition method)
+        {
+            var offsets = new Dictionary<Instruction, int>();
+            int offset = 0;
+            foreach (var instruction in method.Body.Instructions)
+            {
+                offsets.Add(instruction, offset);
+                offset += instruction.GetSize();
+            }
+            foreach (var branch in method.Body.Instructions.Where(i => i.OpCode.OperandType == OperandType.ShortInlineBrTarget))
+            {
+                int distance = offsets[(Instruction)branch.Operand] - offsets[branch] - branch.GetSize();
+                Require(distance >= SByte.MinValue && distance <= SByte.MaxValue,
+                    "Переход в коде списка воспроизведения выходит за допустимый диапазон.");
+            }
+        }
+
+        private static MethodDefinition FindTranslator(TypeDefinition type, string name)
+        {
+            var method = FindMethod(type, name, 1);
+            Require(method.IsStatic && method.ReturnType.FullName == "System.String" &&
+                method.Parameters[0].ParameterType.FullName == "System.String",
+                "Изменилась сигнатура метода локализации " + name + ".");
+            return method;
         }
 
         private static MethodDefinition FindMethod(TypeDefinition type, string name, int parameterCount)
         {
-            return type.Methods.Single(method => method.Name == name && method.Parameters.Count == parameterCount);
+            Require(type != null, "Отсутствует требуемый тип игрового кода для метода " + name + ".");
+            var methods = type.Methods.Where(method => method.Name == name && method.Parameters.Count == parameterCount &&
+                method.HasBody && method.Body.Instructions.Count > 0).ToArray();
+            Require(methods.Length == 1, "Не найден однозначный игровой метод " + type.FullName + "." + name + ".");
+            return methods[0];
+        }
+
+        private static void CheckLocaleSchema(ModuleDefinition module)
+        {
+            const string scope = "PcStore.Localization.";
+            CheckFields(module.GetType(scope + "LocaleTable"), "System.String code", "System.String nativeName",
+                "System.Int32 order", scope + "LocaleTable/Entry[] entries");
+            CheckFields(module.GetType(scope + "LocaleTable/Entry"), "System.String key", "System.String value");
+            CheckFields(module.GetType(scope + "LocaleCatalog"),
+                "System.Collections.Generic.List`1<" + scope + "LocaleTable> locales", scope + "LocaleTable fallback");
+        }
+
+        private static void CheckFields(TypeDefinition type, params string[] expected)
+        {
+            const string reference = "UnityEngine.SerializeReference";
+            Require(type != null, "В игровом коде отсутствует тип таблицы или каталога локалей.");
+            var fields = type.Fields.Where(field => !field.IsStatic && !field.IsNotSerialized &&
+                (field.IsPublic || field.CustomAttributes.Any(attribute =>
+                    attribute.AttributeType.FullName == "UnityEngine.SerializeField" ||
+                    attribute.AttributeType.FullName == reference))).ToArray();
+            Require(fields.All(field => !field.CustomAttributes.Any(attribute => attribute.AttributeType.FullName == reference)) &&
+                fields.Select(field => field.FieldType.FullName + " " + field.Name).SequenceEqual(expected),
+                "Изменилась структура таблицы или каталога локалей в игровом коде.");
+        }
+
+        private static bool IsLiteral(Instruction instruction, string value)
+        {
+            return instruction != null && instruction.OpCode == OpCodes.Ldstr && (string)instruction.Operand == value;
+        }
+
+        private static bool IsSetter(Instruction instruction, string type, string property, string parameter)
+        {
+            var method = instruction == null ? null : instruction.Operand as MethodReference;
+            return method != null && instruction.OpCode == OpCodes.Callvirt && method.HasThis &&
+                method.Name == "set_" + property && method.DeclaringType.FullName == type &&
+                method.ReturnType.FullName == "System.Void" && method.Parameters.Count == 1 &&
+                method.Parameters[0].ParameterType.FullName == parameter;
+        }
+
+        private static bool HasTranslation(MethodDefinition method, string literal, string translator, string setterType)
+        {
+            return method.Body.Instructions.Any(i => IsLiteral(i, literal) && HasCall(i.Next, translator) &&
+                IsSetter(i.Next.Next, setterType, "text", "System.String"));
         }
 
         private static bool HasCall(Instruction instruction, string name)
         {
-            var method = instruction.Operand as MethodReference;
-            return instruction.OpCode == OpCodes.Call && method != null &&
+            var method = instruction == null ? null : instruction.Operand as MethodReference;
+            return method != null && instruction.OpCode == OpCodes.Call &&
                 method.Name == name && method.DeclaringType.FullName == "PcStore.Localization.Loc";
+        }
+
+        private static void Require(bool condition, string message)
+        {
+            if (!condition)
+            {
+                throw new InvalidDataException(message);
+            }
         }
     }
 }
